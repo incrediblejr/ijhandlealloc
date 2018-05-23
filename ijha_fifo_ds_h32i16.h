@@ -1,9 +1,9 @@
+/* clang-format off */
 /*
-ijha_fifo_ds_h32i16
-   : HandleAllocator FIFO DenseSparse-bookkeeping 32bit Handles 16bit Indices
+ijha_fifo_ds_h32i16 : IncredibleJunior HandleAllocator FIFO DenseSparse-bookkeeping 32-bit Handles 16-bit Indices
 
 ijha_fifo_ds_h32i16 is a FIFO handle allocator built on top of ijha_fifo_h32 with
-added bookkeeping of handle's sparse/dense relationships to be able to keep
+added bookkeeping of handles' sparse/dense relationships to be able to keep
 all (used) data linear in memory while retaining stable handles.
 
 This was inspired by Niklas Gray's (@niklasfrykholm) blogpost about packed arrays [1],
@@ -13,7 +13,7 @@ In order to keep the ijha_fifo_h32's handles map to data that is kept linear
 in memory, extra bookkeeping is needed to track the handles (sparse) mapping
 into the linear (dense/packed) array.
 
-If we have an array of (4) objects and were to use ijha_fifo_h32's sparse handles
+If we have an array of 4 objects and were to use ijha_fifo_h32's sparse handles
 to map to slots in the array our array would look (potentially) like:
 
 F == Free
@@ -42,7 +42,7 @@ that is indexed by the handle for different purposes.)
 
 This gives us an array that looks like
 +---------------+
-| F | F | U | U |
+| U | U | F | F |
 +---------------+
 
 This is good for cache utilization and the soul.
@@ -51,7 +51,7 @@ ijha_fifo_ds_h32i16 is built on top of ijha_fifo_h32 all functions of ijha_fifo_
 are available to ijha_fifo_ds_h32i16 (but not vice-versa).
 
 ijha_fifo_ds_h32i16 used ijha_fifo_h32 for handle allocation with added dense/sparse
-mapping layered on top, which means that it shares all ijha_fifo_h32 limits/features.
+mapping layered on top, which means that it shares all ijha_fifo_h32 limitations/features.
 
 ijha_fifo_ds_h32i16 has the added limitation that the number of handles that
 can be used is equal to USHORT_MAX (0xffffu). If more handles is needed you
@@ -61,7 +61,7 @@ Usage examples+tests is at the bottom of the file in the IJHA_FIFO_DS_H32I16_TES
 
 This file provides both the interface and the implementation.
 
-The handle allocator is implemented as a [stb-style header-file library][2]
+The handle allocator is implemented as a stb-style header-file library[2]
 which means that in *ONE* source file, put:
 
    #define IJHA_FIFO_DS_H32I16_IMPLEMENTATION
@@ -71,7 +71,7 @@ which means that in *ONE* source file, put:
 
 Other source files should just include ijha_fifo_ds_h32i16.h
 
-NB: as ijha_fifo_ds_h32i16 depends on ijha_fifo_h32 that implementation also has to be instantiated.
+NB: ijha_fifo_ds_h32i16 depends on ijha_fifo_h32 (that implementation also has to be instantiated)
 
 References:
 
@@ -96,30 +96,31 @@ extern "C" {
    #define IJHA_FIFO_DS_H32I16_API extern
 #endif
 
-#define IJHA_FIFO_DS_H32I16_INVALID_INDEX ((unsigned)-1)
+/* storage size needed for max_num_handles with _optional_ userdata size in bytes per item.
+   if the handles will _not_ be interleaved with userdata, then the userdata size is 0.
 
-/* storage size needed for max_num_handles (max_num_handles will be rounded
-   up to next power of 2)
-   NB: the size of 'struct ijha_fifo_h32' is _not_ included */
-IJHA_FIFO_DS_H32I16_API unsigned ijha_fifo_ds_h32i16_memory_size_needed(unsigned max_num_handles);
+   max_num_handles will be rounded up to next power of 2.
+
+   NB: the size of 'struct ijha_fifo_h32' is not included */
+IJHA_FIFO_DS_H32I16_API unsigned ijha_fifo_ds_h32i16_memory_size_needed(unsigned max_num_handles,
+   unsigned userdata_size_in_bytes_per_item);
 
 /* this just forwards to 'ijha_fifo_h32_init_stride' with a set handles_stride so the
    same limitations apply.
 
    ijha_fifo_ds_h32i16 has the added limitation that the max_num_handles
-   must be less or equal to USHORT_MAX (0xffffu).
-*/
+   must be less or equal to USHORT_MAX (0xffffu). */
 IJHA_FIFO_DS_H32I16_API void ijha_fifo_ds_h32i16_init(struct ijha_fifo_h32 *self, unsigned max_num_handles,
-   unsigned num_userflag_bits, void *memory, unsigned memory_size);
+   unsigned num_userflag_bits, unsigned userdata_size_in_bytes_per_item, void *memory, unsigned memory_size);
 
-/* returns the packed/dense index of the newly allocated handle on success
-   or IJHA_FIFO_DS_H32I16_INVALID_INDEX on failure (all handles are used i.e. full) */
-IJHA_FIFO_DS_H32I16_API unsigned ijha_fifo_ds_h32i16_alloc(struct ijha_fifo_h32 *self, unsigned *handle_out);
-IJHA_FIFO_DS_H32I16_API unsigned ijha_fifo_ds_h32i16_alloc_mask(struct ijha_fifo_h32 *self,
+/* returns the packed/dense index of the newly acquired handle on success
+   or IJHA_FIFO_H32_INVALID_INDEX on failure (all handles are used i.e. full) */
+IJHA_FIFO_DS_H32I16_API unsigned ijha_fifo_ds_h32i16_acquire_mask(struct ijha_fifo_h32 *self,
    unsigned userflag_mask, unsigned *handle_out);
+#define ijha_fifo_ds_h32i16_acquire(self, handle_out) ijha_fifo_ds_h32i16_acquire_mask((self), 0, (handle_out))
 
 /*
-deallocate the _valid_ handle and returns if it was the last index in the packed/dense array.
+release the _valid_ handle and returns if it was the last index in the packed/dense array.
 
 returns:
    1 if the handle was the last/back handle
@@ -127,29 +128,23 @@ returns:
 
 examples:
    unsigned move_from_index, move_to_index;
-   ijha_fifo_ds_h32i16_dealloc(self, handle, &move_from_index, &move_to_index);
+   ijha_fifo_ds_h32i16_release(self, handle, &move_from_index, &move_to_index);
    my_objects[move_to_index] = my_objects[move_from_index]
    ...
    unsigned handle_0, handle_1, handle_2;
-   ijha_fifo_ds_h32i16_alloc(self, &handle_0);
-   ijha_fifo_ds_h32i16_alloc(self, &handle_1);
-   ijha_fifo_ds_h32i16_alloc(self, &handle_2);
-   assert(ijha_fifo_ds_h32i16_dealloc(self, &handle_2));
-   assert(!ijha_fifo_ds_h32i16_dealloc(self, &handle_0));
+   ijha_fifo_ds_h32i16_acquire(self, &handle_0);
+   ijha_fifo_ds_h32i16_acquire(self, &handle_1);
+   ijha_fifo_ds_h32i16_acquire(self, &handle_2);
+   assert(ijha_fifo_ds_h32i16_release(self, &handle_2));
+   assert(!ijha_fifo_ds_h32i16_release(self, &handle_0));
 
 NB:
    assumes the handle is valid. if uncertain, use 'ijha_fifo_h32_valid(self, handle)'
    beforehand to check handle validity */
-IJHA_FIFO_DS_H32I16_API int ijha_fifo_ds_h32i16_dealloc(struct ijha_fifo_h32 *self, unsigned handle,
+IJHA_FIFO_DS_H32I16_API int ijha_fifo_ds_h32i16_release(struct ijha_fifo_h32 *self, unsigned handle,
    unsigned *move_from_index, unsigned *move_to_index);
 
-/* returns the packed/dense index of the handle or IJHA_FIFO_DS_H32I16_INVALID_INDEX if handle is invalid */
-IJHA_FIFO_DS_H32I16_API unsigned ijha_fifo_ds_h32i16_dense_index_safe(struct ijha_fifo_h32 *self, unsigned handle);
-
-/* returns the packed/dense index of the handle
-   NB: assumes that the handle is valid.
-       if uncertain, use 'ijha_fifo_h32_valid(self, handle)' to check if handle is valid
-       alt use 'ijha_fifo_ds_h32i16_dense_index_safe' */
+/* returns the packed/dense index of the handle or IJHA_FIFO_H32_INVALID_INDEX if handle is invalid */
 IJHA_FIFO_DS_H32I16_API unsigned ijha_fifo_ds_h32i16_dense_index(struct ijha_fifo_h32 *self, unsigned handle);
 
 #ifdef __cplusplus
@@ -170,11 +165,11 @@ IJHA_FIFO_DS_H32I16_API unsigned ijha_fifo_ds_h32i16_dense_index(struct ijha_fif
 #define ijha_fifo_ds_h32i16__pointer_add(p, bytes) ((unsigned char*)(p)+(bytes))
 #define ijha_fifo_ds_h32i16__cast(t, exp) ((t) (exp))
 
-#define ijha_fifo_ds_h32i16__handle_info_at(index) ijha_fifo_ds_h32i16__cast(struct ijha_fifo_ds_h32i16_index*, ijha_fifo_ds_h32i16__pointer_add(self->handles, self->handles_stride*(index)))
+#define ijha_fifo_ds_h32i16__handle_info_at(index) ijha_fifo_ds_h32i16__cast(struct ijha_fifo_ds_h32i16_indexhandle*, ijha_fifo_ds_h32i16__pointer_add(self->handles, ijha_fifo_h32_handle_stride(self->handles_stride_userdata_offset)*(index)))
 
 static unsigned ijha_fifo_ds_h32i16__num_bits(unsigned n) { unsigned res=0; while (n >>= 1) res++; return res; }
 
-/* sparse/dense index notes for struct ijha_fifo_ds_h32i16_index
+/* sparse/dense index notes for struct ijha_fifo_ds_h32i16_indexhandle
 
 sparse_index = handle&capacity_mask
 
@@ -183,38 +178,39 @@ handles[dense_index].sparse_index is the sparse_index of dense_index.
 
 the handle of the dense_index is handles[ handles[dense_index].sparse_index ].handle
 */
-struct ijha_fifo_ds_h32i16_index {
-   struct ijha_fifo_h32_index handle_alloc_index;
+struct ijha_fifo_ds_h32i16_indexhandle {
+   struct ijha_fifo_h32_indexhandle handle_alloc_index;
 
    unsigned short dense_index; /* index into the 'packed array'/'dense part' */
    unsigned short sparse_index; /* the sparse index of indices[dense_index] */
 };
 
-IJHA_FIFO_DS_H32I16_API unsigned ijha_fifo_ds_h32i16_memory_size_needed(unsigned max_num_handles)
+IJHA_FIFO_DS_H32I16_API unsigned ijha_fifo_ds_h32i16_memory_size_needed(unsigned max_num_handles,
+   unsigned userdata_size_in_bytes_per_item)
 {
    ijha_fifo_ds_h32i16__roundup(max_num_handles);
-   return max_num_handles * sizeof(struct ijha_fifo_ds_h32i16_index);
+   return max_num_handles * (sizeof(struct ijha_fifo_ds_h32i16_indexhandle) + userdata_size_in_bytes_per_item);
 }
 
 IJHA_FIFO_DS_H32I16_API void ijha_fifo_ds_h32i16_init(struct ijha_fifo_h32 *self, unsigned max_num_handles,
-   unsigned num_userflag_bits, void *memory, unsigned memory_size)
+   unsigned num_userflag_bits, unsigned userdata_size_in_bytes_per_item, void *memory, unsigned memory_size)
 {
    ijha_fifo_ds_h32i16__roundup(max_num_handles);
-   IJHA_FIFO_DS_H32I16_assert(!memory_size || (ijha_fifo_ds_h32i16_memory_size_needed(max_num_handles) <= memory_size));
+   IJHA_FIFO_DS_H32I16_assert(!memory_size || (ijha_fifo_ds_h32i16_memory_size_needed(max_num_handles, userdata_size_in_bytes_per_item) <= memory_size));
    IJHA_FIFO_DS_H32I16_assert((unsigned)(unsigned short)-1 >= max_num_handles);
-   ijha_fifo_h32_init_stride(self, max_num_handles, num_userflag_bits, memory, memory_size, sizeof(struct ijha_fifo_ds_h32i16_index));
+   ijha_fifo_h32_init_stride(self, max_num_handles, num_userflag_bits, userdata_size_in_bytes_per_item,  sizeof(struct ijha_fifo_ds_h32i16_indexhandle), memory, memory_size);
 
    ijha_fifo_h32_reset(self);
 }
 
-IJHA_FIFO_DS_H32I16_API unsigned ijha_fifo_ds_h32i16_alloc_mask(struct ijha_fifo_h32 *self,
+IJHA_FIFO_DS_H32I16_API unsigned ijha_fifo_ds_h32i16_acquire_mask(struct ijha_fifo_h32 *self,
    unsigned userflags, unsigned *handle_out)
 {
-   unsigned dense_index = ijha_fifo_h32_alloc_mask(self, userflags, handle_out);
-   IJHA_FIFO_DS_H32I16_assert(self->handles_stride == sizeof(struct ijha_fifo_ds_h32i16_index));
+   unsigned dense_index = ijha_fifo_h32_acquire_mask(self, userflags, handle_out);
+   IJHA_FIFO_DS_H32I16_assert(ijha_fifo_h32_userdata_offset(self->handles_stride_userdata_offset) == sizeof(struct ijha_fifo_ds_h32i16_indexhandle));
    IJHA_FIFO_DS_H32I16_assert((0xffff0000u&dense_index) == 0);
    if (dense_index == IJHA_FIFO_H32_INVALID_INDEX) {
-      return IJHA_FIFO_DS_H32I16_INVALID_INDEX;
+      return IJHA_FIFO_H32_INVALID_INDEX;
    } else {
       unsigned sparse_index = *handle_out&self->capacity_mask;
       IJHA_FIFO_DS_H32I16_assert((0xffff0000u&sparse_index) == 0);
@@ -224,23 +220,18 @@ IJHA_FIFO_DS_H32I16_API unsigned ijha_fifo_ds_h32i16_alloc_mask(struct ijha_fifo
    }
 }
 
-IJHA_FIFO_DS_H32I16_API unsigned ijha_fifo_ds_h32i16_alloc(struct ijha_fifo_h32 *self, unsigned *handle_out)
-{
-   return ijha_fifo_ds_h32i16_alloc_mask(self, 0, handle_out);
-}
-
-IJHA_FIFO_DS_H32I16_API int ijha_fifo_ds_h32i16_dealloc(struct ijha_fifo_h32 *self,
+IJHA_FIFO_DS_H32I16_API int ijha_fifo_ds_h32i16_release(struct ijha_fifo_h32 *self,
    unsigned handle, unsigned *move_from_index, unsigned *move_to_index)
 {
-   unsigned sparse_index_of_removed = handle&self->capacity_mask;
+   unsigned sparse_index_of_removed = ijha_fifo_h32_release(self, handle);
    unsigned dense_index_of_removed = ijha_fifo_ds_h32i16__handle_info_at(sparse_index_of_removed)->dense_index;
-   int is_back_index = dense_index_of_removed == self->num_handles-1;
-   IJHA_FIFO_DS_H32I16_assert(self->handles_stride == sizeof(struct ijha_fifo_ds_h32i16_index));
-   ijha_fifo_h32_dealloc(self, handle);
+   int is_back_index = dense_index_of_removed == self->num_handles;
+   IJHA_FIFO_DS_H32I16_assert(ijha_fifo_h32_userdata_offset(self->handles_stride_userdata_offset) == sizeof(struct ijha_fifo_ds_h32i16_indexhandle));
+   IJHA_FIFO_DS_H32I16_assert(sparse_index_of_removed != IJHA_FIFO_H32_INVALID_INDEX);
 
    /* the item @ 'back_index' in indices have to be updated to point to 'dense_index_of_removed' */
    if (!is_back_index) {
-      struct ijha_fifo_ds_h32i16_index *back_info = ijha_fifo_ds_h32i16__handle_info_at(self->num_handles);
+      struct ijha_fifo_ds_h32i16_indexhandle *back_info = ijha_fifo_ds_h32i16__handle_info_at(self->num_handles);
       unsigned short sparse_index_of_back = back_info->sparse_index;
       ijha_fifo_ds_h32i16__handle_info_at(sparse_index_of_back)->dense_index = (unsigned short) dense_index_of_removed;
       ijha_fifo_ds_h32i16__handle_info_at(dense_index_of_removed)->sparse_index = sparse_index_of_back;
@@ -254,20 +245,13 @@ IJHA_FIFO_DS_H32I16_API int ijha_fifo_ds_h32i16_dealloc(struct ijha_fifo_h32 *se
    return is_back_index;
 }
 
-IJHA_FIFO_DS_H32I16_API unsigned ijha_fifo_ds_h32i16_dense_index_safe(struct ijha_fifo_h32 *self, unsigned handle)
+IJHA_FIFO_DS_H32I16_API unsigned ijha_fifo_ds_h32i16_dense_index(struct ijha_fifo_h32 *self, unsigned handle)
 {
-   IJHA_FIFO_DS_H32I16_assert(self->handles_stride == sizeof(struct ijha_fifo_ds_h32i16_index));
+   IJHA_FIFO_DS_H32I16_assert(ijha_fifo_h32_userdata_offset(self->handles_stride_userdata_offset) == sizeof(struct ijha_fifo_ds_h32i16_indexhandle));
    if (ijha_fifo_h32_valid(self, handle))
       return ijha_fifo_ds_h32i16__handle_info_at(handle&self->capacity_mask)->dense_index;
 
-   return IJHA_FIFO_DS_H32I16_INVALID_INDEX;
-}
-
-IJHA_FIFO_DS_H32I16_API unsigned ijha_fifo_ds_h32i16_dense_index(struct ijha_fifo_h32 *self, unsigned handle)
-{
-   IJHA_FIFO_DS_H32I16_assert(self->handles_stride == sizeof(struct ijha_fifo_ds_h32i16_index));
-   IJHA_FIFO_DS_H32I16_assert(ijha_fifo_h32_valid(self, handle));
-   return ijha_fifo_ds_h32i16__handle_info_at(handle&self->capacity_mask)->dense_index;
+   return IJHA_FIFO_H32_INVALID_INDEX;
 }
 
 #endif /* IJHA_FIFO_DS_H32I16_IMPLEMENTATION */
@@ -333,27 +317,32 @@ static void ijha_fifo_ds_h32i16_verify_handles(struct ijha_fifo_h32 *self,
 
 static void ijha_fifo_ds_h32i16_test(void)
 {
-#define IJHA_unit_test_num_handles_to_alloc (4)
+#define IJHA_unit_test_num_handles_to_acquire (4)
    unsigned char test_memory[1024*16];
-   unsigned handles[IJHA_unit_test_num_handles_to_alloc];
-   int valids[IJHA_unit_test_num_handles_to_alloc];
-   ijha_fifo_ds_h32i16_test_object test_objects[IJHA_unit_test_num_handles_to_alloc];
-   ijha_fifo_ds_h32i16_alive_object active_objects[IJHA_unit_test_num_handles_to_alloc];
-
+   unsigned handles[IJHA_unit_test_num_handles_to_acquire];
+   int valids[IJHA_unit_test_num_handles_to_acquire];
+   ijha_fifo_ds_h32i16_test_object test_objects[IJHA_unit_test_num_handles_to_acquire];
+   ijha_fifo_ds_h32i16_alive_object active_objects[IJHA_unit_test_num_handles_to_acquire];
+   unsigned userdata_size_base = sizeof(unsigned);
    struct ijha_fifo_h32 pa, *self = &pa;
    unsigned index, inner;
    unsigned IJHA_TO_INVALID_INDEX = (unsigned)-1;
 
-   for (index = 0; index != 4; ++index) {
-      unsigned max_num_handles = IJHA_unit_test_num_handles_to_alloc;
+   for (index = 0; index != 8; ++index) {
+      unsigned max_num_handles = IJHA_unit_test_num_handles_to_acquire;
       unsigned num_generation_bits = index;
-      unsigned num_userflag_bits = 32-ijha_fifo_ds_h32i16__num_bits(IJHA_unit_test_num_handles_to_alloc)-num_generation_bits;
+      unsigned num_userflag_bits = 32-ijha_fifo_ds_h32i16__num_bits(IJHA_unit_test_num_handles_to_acquire)-num_generation_bits;
       unsigned alloc_userflags = (1u<<(32-num_userflag_bits));
       unsigned capacity;
-      ijha_fifo_ds_h32i16_init(self, max_num_handles, num_userflag_bits, test_memory, sizeof(test_memory));
-      capacity = self->capacity_mask;
-      ijha_fifo_h32_test_instance(self, alloc_userflags, handles, valids);
+      unsigned userdata_size = 0;
+      int has_unsigned_userdata = index >= 4;
+      if (has_unsigned_userdata)
+         userdata_size = userdata_size_base*(index-3);
 
+      ijha_fifo_ds_h32i16_init(self, max_num_handles, num_userflag_bits, userdata_size, test_memory, sizeof(test_memory));
+      capacity = self->capacity_mask;
+      ijha_fifo_h32_test_instance(self, alloc_userflags, has_unsigned_userdata, handles, valids);
+      IJHA_FIFO_H32_memset(test_objects, 0, sizeof test_objects);
       for (inner = 0; inner != 2; ++inner) {
          unsigned loop_index, packedi;
          unsigned num_active_objects = 0;
@@ -362,8 +351,8 @@ static void ijha_fifo_ds_h32i16_test(void)
 
          for (loop_index=0; loop_index != capacity; ++loop_index) {
             ijha_fifo_ds_h32i16_test_object *object;
-            unsigned dense_index = ijha_fifo_ds_h32i16_alloc_mask(self, alloc_userflags, &handles[loop_index]);
-            IJHA_FIFO_DS_H32I16_assert(dense_index != IJHA_FIFO_DS_H32I16_INVALID_INDEX);
+            unsigned dense_index = ijha_fifo_ds_h32i16_acquire_mask(self, alloc_userflags, &handles[loop_index]);
+            IJHA_FIFO_DS_H32I16_assert(dense_index != IJHA_FIFO_H32_INVALID_INDEX);
             IJHA_FIFO_DS_H32I16_assert(ijha_fifo_h32_valid(self, handles[loop_index]) && (handles[loop_index]&alloc_userflags)==alloc_userflags);
             object = test_objects+dense_index;
             object->verify_handle_a = object->verify_handle_b = handles[loop_index];
@@ -412,7 +401,7 @@ static void ijha_fifo_ds_h32i16_test(void)
                unsigned handle_to_remove = handles[loop_index];
                IJHA_FIFO_DS_H32I16_assert(handle_to_remove);
 
-               last_handle = ijha_fifo_ds_h32i16_dealloc(self, handle_to_remove, &move_from, &move_to);
+               last_handle = ijha_fifo_ds_h32i16_release(self, handle_to_remove, &move_from, &move_to);
                IJHA_FIFO_DS_H32I16_assert(!last_handle || move_to == move_from);
                removed_o = test_objects + move_to;
                IJHA_FIFO_DS_H32I16_assert(removed_o->verify_handle_a == handle_to_remove && removed_o->verify_handle_b == handle_to_remove);
@@ -481,7 +470,7 @@ static void ijha_fifo_ds_h32i16_test(void)
          }
 
          for (loop_index=0; loop_index != capacity; ++loop_index) {
-            unsigned test_index = ijha_fifo_ds_h32i16_alloc_mask(self, alloc_userflags, &handles[loop_index]);
+            unsigned test_index = ijha_fifo_ds_h32i16_acquire_mask(self, alloc_userflags, &handles[loop_index]);
             IJHA_FIFO_DS_H32I16_assert(ijha_fifo_h32_valid(self, handles[loop_index]));
             ijha_fifo_ds_h32i16_test_object *to = test_objects+test_index;
             to->verify_handle_a = to->verify_handle_b = handles[loop_index];
@@ -508,11 +497,13 @@ static void ijha_fifo_ds_h32i16_test(void)
 
          for (loop_index=0; loop_index != capacity; ++loop_index) {
             unsigned move_from, move_to;
-            if (ijha_fifo_ds_h32i16_dealloc(self, handles[loop_index], &move_from, &move_to)) {
+            if (ijha_fifo_ds_h32i16_release(self, handles[loop_index], &move_from, &move_to)) {
                IJHA_FIFO_DS_H32I16_assert(move_to == move_from);
             } else {
                IJHA_FIFO_DS_H32I16_assert(move_to != move_from);
-               test_objects[move_to] = test_objects[move_from];
+			   IJHA_FIFO_DS_H32I16_assert(capacity > move_to);
+			   IJHA_FIFO_DS_H32I16_assert(capacity > move_from);
+               test_objects[move_to] = test_objects[move_from]; /* clang complains here */
             }
             test_objects[move_from].valid = 0;
             IJHA_FIFO_DS_H32I16_assert(!ijha_fifo_h32_valid(self, handles[loop_index]));
@@ -532,7 +523,7 @@ static void ijha_fifo_ds_h32i16_test(void)
          IJHA_FIFO_DS_H32I16_assert(self->num_handles == 0);
 
          for (loop_index=0; loop_index != capacity; ++loop_index) {
-            unsigned test_index = ijha_fifo_ds_h32i16_alloc_mask(self, alloc_userflags, &handles[loop_index]);
+            unsigned test_index = ijha_fifo_ds_h32i16_acquire_mask(self, alloc_userflags, &handles[loop_index]);
             IJHA_FIFO_DS_H32I16_assert(ijha_fifo_h32_valid(self, handles[loop_index]));
             ijha_fifo_ds_h32i16_test_object *to = test_objects+test_index;
             IJHA_FIFO_DS_H32I16_assert(test_index == loop_index);
@@ -559,7 +550,7 @@ static void ijha_fifo_ds_h32i16_test(void)
             unsigned move_from, move_to;
             IJHA_FIFO_DS_H32I16_assert(handles[0]);
             IJHA_FIFO_DS_H32I16_assert(ijha_fifo_h32_valid(self, handles[0]));
-            if (ijha_fifo_ds_h32i16_dealloc(self, handles[0], &move_from, &move_to)) {
+            if (ijha_fifo_ds_h32i16_release(self, handles[0], &move_from, &move_to)) {
                IJHA_FIFO_DS_H32I16_assert(move_to == move_from);
             } else {
                IJHA_FIFO_DS_H32I16_assert(move_to != move_from);
@@ -587,7 +578,7 @@ static void ijha_fifo_ds_h32i16_test(void)
                continue;
 
             IJHA_FIFO_DS_H32I16_assert(ijha_fifo_h32_valid(self, handles[loop_index]));
-            if (ijha_fifo_ds_h32i16_dealloc(self, handles[loop_index], &move_from, &move_to)) {
+            if (ijha_fifo_ds_h32i16_release(self, handles[loop_index], &move_from, &move_to)) {
                IJHA_FIFO_DS_H32I16_assert(move_to == move_from);
             } else {
                IJHA_FIFO_DS_H32I16_assert(move_to != move_from);
@@ -614,7 +605,7 @@ static void ijha_fifo_ds_h32i16_test(void)
       }
    }
 
-#undef IJHA_unit_test_num_handles_to_alloc
+#undef IJHA_unit_test_num_handles_to_acquire
 }
 
 #if defined (IJHA_FIFO_DS_H32I16_TEST_MAIN)
@@ -636,7 +627,8 @@ static void ijha_fifo_ds_h32i16_test(void)
 
 int main(int args, char **argc)
 {
-   (void)(args, argc);
+   (void)args;
+   (void)argc;
    printf("running tests for IJHA_FIFO_DS_H32I16.\n");
    ijha_fifo_h32_test();
    ijha_fifo_ds_h32i16_test();
@@ -653,7 +645,7 @@ LICENSE
 This software is available under 2 licenses -- choose whichever you prefer.
 ------------------------------------------------------------------------------
 ALTERNATIVE A - 3-Clause BSD License
-Copyright (c) 2017, Fredrik Engkvist
+Copyright (c) 2017-2018, Fredrik Engkvist
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -697,3 +689,4 @@ ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ------------------------------------------------------------------------------
 */
+/* clang-format on */
