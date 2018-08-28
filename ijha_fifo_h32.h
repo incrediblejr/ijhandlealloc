@@ -212,17 +212,19 @@ IJHA_FIFO_H32_API int ijha_fifo_h32_valid(struct ijha_fifo_h32 *self, unsigned h
 
 /* retrieve userdata of handle (assumes that the instance was initialized with userdata)
    NB: assumes that the handle is valid (if uncertain use 'ijha_fifo_h32_valid' beforehand) */
-#define ijha_fifo_h32_userdata(self, handle_or_index) \
-   (void*)((unsigned char*)(self)->handles + ijha_fifo_h32_handle_stride((self)->handles_stride_userdata_offset) * \
-   (ijha_fifo_h32_index(self, handle_or_index)) + \
+#define ijha_fifo_h32_userdata(userdata_type, self, handle_or_index) \
+   (userdata_type)((unsigned char*)(self)->handles + ijha_fifo_h32_handle_stride((self)->handles_stride_userdata_offset) * \
+   (ijha_fifo_h32_index((self), (handle_or_index))) + \
    ijha_fifo_h32_userdata_offset((self)->handles_stride_userdata_offset))
 
 /* retrieve handle from index */
 #define ijha_fifo_h32_handle_from_index(self, index) \
-  ((struct ijha_fifo_h32_indexhandle*)((unsigned char*)(self)->handles + ijha_fifo_h32_handle_stride((self)->handles_stride_userdata_offset) * index))->handle
+  ((struct ijha_fifo_h32_indexhandle*)((unsigned char*)(self)->handles + ijha_fifo_h32_handle_stride((self)->handles_stride_userdata_offset) * (index)))->handle
 
 /* returns the index of the handle on success
-   IJHA_FIFO_H32_INVALID_INDEX on failure (all handles are used i.e. full) */
+   IJHA_FIFO_H32_INVALID_INDEX on failure (all handles are used i.e. full)
+
+   NB: this is a sparse index as the 'active' handles is not kept linear in memory */
 IJHA_FIFO_H32_API unsigned ijha_fifo_h32_acquire_mask(struct ijha_fifo_h32 *self,
    unsigned userflags, unsigned *handle_out);
 #define ijha_fifo_h32_acquire(self, handle_out) ijha_fifo_h32_acquire_mask((self), 0, (handle_out))
@@ -266,10 +268,9 @@ ijha_fifo_h32__static_assert(sizeof(unsigned short) == 2);
 
 #define ijha_fifo_h32__roundup(x) (--(x), (x)|=(x)>>1, (x)|=(x)>>2, (x)|=(x)>>4, (x)|=(x)>>8, (x)|=(x)>>16, ++(x))
 
-#define ijha_fifo_h32__pointer_add(p, bytes) ((unsigned char*)(p)+(bytes))
-#define ijha_fifo_h32__cast(t, exp) ((t) (exp))
+#define ijha_fifo_h32__pointer_add(type, p, bytes) ((type)((unsigned char*)(p)+(bytes)))
 
-#define ijha_fifo_h32__handle_info_at(index) ijha_fifo_h32__cast(struct ijha_fifo_h32_indexhandle*, ijha_fifo_h32__pointer_add(self->handles, ijha_fifo_h32_handle_stride(self->handles_stride_userdata_offset)*(index)))
+#define ijha_fifo_h32__handle_info_at(index) ijha_fifo_h32__pointer_add(struct ijha_fifo_h32_indexhandle*, self->handles, ijha_fifo_h32_handle_stride(self->handles_stride_userdata_offset)*(index))
 
 #ifndef IJHA_FIFO_H32_assert
    #include <assert.h>
@@ -347,7 +348,6 @@ IJHA_FIFO_H32_API unsigned ijha_fifo_h32_acquire_mask(struct ijha_fifo_h32 *self
       *handle_out = 0;
       return IJHA_FIFO_H32_INVALID_INDEX;
    } else {
-      unsigned object_index = (unsigned)self->num_handles++;
       unsigned generation_mask = self->generation_mask;
       unsigned generation_to_add = self->capacity_mask+1;
       unsigned next_to_last_generation_mask = (generation_mask<<1)&generation_mask;
@@ -382,8 +382,9 @@ IJHA_FIFO_H32_API unsigned ijha_fifo_h32_acquire_mask(struct ijha_fifo_h32 *self
 
       IJHA_FIFO_H32_assert((index_handle&self->capacity_mask) == (index->handle&self->capacity_mask));
 
+      ++self->num_handles;
       *handle_out = index->handle;
-      return object_index;
+      return index->handle&self->capacity_mask;
    }
 }
 
@@ -427,7 +428,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
       unsigned clearindex;
 
       for (clearindex=0; clearindex!=self->capacity_mask+1; ++clearindex) {
-         userdata = (unsigned*) ijha_fifo_h32_userdata(self, clearindex);
+         userdata = ijha_fifo_h32_userdata(unsigned*, self, clearindex);
          *userdata = 0;
       }
    }
@@ -435,7 +436,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
    for (i=0; i!=num_useable_handles; ++i) {
       ijha_fifo_h32_acquire_mask(self, alloc_userflags, &handles[i]);
       if (has_unsigned_userdata) {
-         userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[i]);
+         userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[i]);
          *userdata = handles[i];
       }
       for (j=0; j<i+1; ++j) {
@@ -451,7 +452,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
          if (valids[j]) {
             IJHA_FIFO_H32_assert(ijha_fifo_h32_handle_from_index(self, ijha_fifo_h32_index(self, handles[j])) == handles[j]);
             if (has_unsigned_userdata) {
-               userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[j]);
+               userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[j]);
                IJHA_FIFO_H32_assert(*userdata == handles[j]);
             }
          }
@@ -464,7 +465,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
       ijha_fifo_h32_release(self, handles[i]);
       IJHA_FIFO_H32_assert(!ijha_fifo_h32_valid(self, handles[i]));
       if (has_unsigned_userdata) {
-          userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[i]);
+          userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[i]);
           IJHA_FIFO_H32_assert(*userdata == handles[i]);
           *userdata = 0;
       }
@@ -477,7 +478,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
       for (j=0; j!=num_useable_handles; ++j) {
          valids[j] = ijha_fifo_h32_valid(self, handles[j]);
          if (has_unsigned_userdata) {
-            userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[j]);
+            userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[j]);
             IJHA_FIFO_H32_assert(*userdata == 0);
          }
          num_valids += valids[j] ? 1 : 0;
@@ -490,7 +491,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
       ijha_fifo_h32_acquire_mask(self, alloc_userflags, &handles[i]);
       IJHA_FIFO_H32_assert(ijha_fifo_h32_handle_from_index(self, ijha_fifo_h32_index(self, handles[i])) == handles[i]);
       if (has_unsigned_userdata) {
-         userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[i]);
+         userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[i]);
          IJHA_FIFO_H32_assert(*userdata == 0);
          *userdata = handles[i];
       }
@@ -503,7 +504,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
          valids[j] = ijha_fifo_h32_valid(self, handles[j]);
          num_valids += valids[j] ? 1 : 0;
          if (has_unsigned_userdata) {
-            userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[j]);
+            userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[j]);
             if (valids[j])
                IJHA_FIFO_H32_assert(*userdata == handles[j]);
             else
@@ -518,20 +519,20 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
       num_valids = 0;
       IJHA_FIFO_H32_assert(ijha_fifo_h32_valid(self, handles[last_index]) && (handles[last_index]&alloc_userflags)==alloc_userflags);
       if (has_unsigned_userdata) {
-         userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[last_index]);
+         userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[last_index]);
          IJHA_FIFO_H32_assert(*userdata == handles[last_index]);
       }
       ijha_fifo_h32_release(self, handles[last_index]);
       IJHA_FIFO_H32_assert(!ijha_fifo_h32_valid(self, handles[last_index]));
       if (has_unsigned_userdata) {
-         userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[last_index]);
+         userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[last_index]);
          *userdata = 0;
       }
       for (j=0; j!=num_useable_handles; ++j) {
          valids[j] = ijha_fifo_h32_valid(self, handles[j]);
          num_valids += valids[j] ? 1 : 0;
          if (has_unsigned_userdata) {
-            userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[j]);
+            userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[j]);
             if (valids[j])
                IJHA_FIFO_H32_assert(*userdata == handles[j]);
             else
@@ -546,20 +547,20 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
       num_valids = 0;
       IJHA_FIFO_H32_assert(ijha_fifo_h32_valid(self, handles[next_to_last_index]) && (handles[next_to_last_index]&alloc_userflags)==alloc_userflags);
       if (has_unsigned_userdata) {
-         userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[next_to_last_index]);
+         userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[next_to_last_index]);
          IJHA_FIFO_H32_assert(*userdata == handles[next_to_last_index]);
       }
       ijha_fifo_h32_release(self, handles[next_to_last_index]);
       IJHA_FIFO_H32_assert(!ijha_fifo_h32_valid(self, handles[next_to_last_index]));
       if (has_unsigned_userdata) {
-         userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[next_to_last_index]);
+         userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[next_to_last_index]);
          *userdata = 0;
       }
       for (j=0; j!=num_useable_handles; ++j) {
          valids[j] = ijha_fifo_h32_valid(self, handles[j]);
          num_valids += valids[j] ? 1 : 0;
           if (has_unsigned_userdata) {
-            userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[j]);
+            userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[j]);
             if (valids[j])
                IJHA_FIFO_H32_assert(*userdata == handles[j]);
             else
@@ -573,7 +574,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
    ijha_fifo_h32_acquire_mask(self, alloc_userflags, &handles[last_index]);
    IJHA_FIFO_H32_assert(ijha_fifo_h32_valid(self, handles[last_index]) && (handles[last_index]&alloc_userflags)==alloc_userflags);
    if (has_unsigned_userdata) {
-      userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[last_index]);
+      userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[last_index]);
       IJHA_FIFO_H32_assert(*userdata == 0);
       *userdata = handles[last_index];
    }
@@ -584,7 +585,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
          valids[j] = ijha_fifo_h32_valid(self, handles[j]);
          num_valids += valids[j] ? 1 : 0;
           if (has_unsigned_userdata) {
-            userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[j]);
+            userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[j]);
             if (valids[j])
                IJHA_FIFO_H32_assert(*userdata == handles[j]);
             else
@@ -597,7 +598,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
    IJHA_FIFO_H32_assert(!ijha_fifo_h32_valid(self, handles[next_to_last_index]));
    ijha_fifo_h32_acquire_mask(self, alloc_userflags, &handles[next_to_last_index]);
    if (has_unsigned_userdata) {
-      userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[next_to_last_index]);
+      userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[next_to_last_index]);
       IJHA_FIFO_H32_assert(*userdata == 0);
       *userdata = handles[next_to_last_index];
    }
@@ -610,7 +611,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
          valids[j] = ijha_fifo_h32_valid(self, handles[j]);
          num_valids += valids[j] ? 1 : 0;
           if (has_unsigned_userdata) {
-            userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[j]);
+            userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[j]);
             if (valids[j])
                IJHA_FIFO_H32_assert(*userdata == handles[j]);
             else
@@ -623,7 +624,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
    for (i=0; i!=num_useable_handles; ++i) {
       ijha_fifo_h32_release(self, handles[i]);
       if (has_unsigned_userdata) {
-         userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[i]);
+         userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[i]);
          IJHA_FIFO_H32_assert(*userdata == handles[i]);
          *userdata = 0;
       }
@@ -638,7 +639,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
          valids[j] = ijha_fifo_h32_valid(self, handles[j]);
          num_valids += valids[j] ? 1 : 0;
          if (has_unsigned_userdata) {
-            userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[j]);
+            userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[j]);
             if (valids[j])
                IJHA_FIFO_H32_assert(*userdata == handles[j]);
             else
@@ -652,7 +653,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
    for (i=0; i!=num_useable_handles; ++i) {
       ijha_fifo_h32_acquire_mask(self, alloc_userflags, &handles[i]);
       if (has_unsigned_userdata) {
-         userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[i]);
+         userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[i]);
          *userdata = handles[i];
       }
       for (j=0; j<i+1; ++j)
@@ -664,7 +665,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
          valids[j] = ijha_fifo_h32_valid(self, handles[j]);
          num_valids += valids[j] ? 1 : 0;
          if (has_unsigned_userdata) {
-            userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[j]);
+            userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[j]);
             if (valids[j])
                IJHA_FIFO_H32_assert(*userdata == handles[j]);
             else
@@ -680,7 +681,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
       IJHA_FIFO_H32_assert(ijha_fifo_h32_valid(self, handles[next_to_last_index]) && (handles[next_to_last_index]&alloc_userflags)==alloc_userflags);
       ijha_fifo_h32_release(self, handles[next_to_last_index]);
       if (has_unsigned_userdata) {
-         userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[next_to_last_index]);
+         userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[next_to_last_index]);
          IJHA_FIFO_H32_assert(*userdata == handles[next_to_last_index]);
          *userdata = 0;
       }
@@ -689,7 +690,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
          valids[j] = ijha_fifo_h32_valid(self, handles[j]);
          num_valids += valids[j] ? 1 : 0;
          if (has_unsigned_userdata) {
-            userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[j]);
+            userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[j]);
             if (valids[j])
                IJHA_FIFO_H32_assert(*userdata == handles[j]);
             else
@@ -702,7 +703,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
    IJHA_FIFO_H32_assert(!ijha_fifo_h32_valid(self, handles[next_to_last_index]));
    ijha_fifo_h32_acquire_mask(self, alloc_userflags, &handles[next_to_last_index]);
    if (has_unsigned_userdata) {
-      userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[next_to_last_index]);
+      userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[next_to_last_index]);
       IJHA_FIFO_H32_assert(*userdata == 0);
       *userdata = handles[next_to_last_index];
    }
@@ -713,7 +714,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
       IJHA_FIFO_H32_assert(ijha_fifo_h32_valid(self, handles[i]) && (handles[i]&alloc_userflags)==alloc_userflags);
       ijha_fifo_h32_release(self, handles[i]);
       if (has_unsigned_userdata) {
-         userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[i]);
+         userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[i]);
          IJHA_FIFO_H32_assert(*userdata == handles[i]);
          *userdata = 0;
       }
@@ -728,7 +729,7 @@ static void ijha_fifo_h32_test_instance(struct ijha_fifo_h32 *self,
          valids[j] = ijha_fifo_h32_valid(self, handles[j]);
          num_valids += valids[j] ? 1 : 0;
          if (has_unsigned_userdata) {
-            userdata = (unsigned*) ijha_fifo_h32_userdata(self, handles[j]);
+            userdata = ijha_fifo_h32_userdata(unsigned*, self, handles[j]);
             if (valids[j])
                IJHA_FIFO_H32_assert(*userdata == handles[j]);
             else
