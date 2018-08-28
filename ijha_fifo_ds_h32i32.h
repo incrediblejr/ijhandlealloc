@@ -155,10 +155,9 @@ IJHA_FIFO_DS_H32I32_API unsigned ijha_fifo_ds_h32i32_dense_index(struct ijha_fif
 
 #define ijha_fifo_ds_h32i32__roundup(x) (--(x), (x)|=(x)>>1, (x)|=(x)>>2, (x)|=(x)>>4, (x)|=(x)>>8, (x)|=(x)>>16, ++(x))
 
-#define ijha_fifo_ds_h32i32__pointer_add(p, bytes) ((unsigned char*)(p)+(bytes))
-#define ijha_fifo_ds_h32i32__cast(t, exp) ((t) (exp))
+#define ijha_fifo_ds_h32i32__pointer_add(type, p, bytes) ((type)((unsigned char*)(p)+(bytes)))
 
-#define ijha_fifo_ds_h32i32__handle_info_at(index) ijha_fifo_ds_h32i32__cast(struct ijha_fifo_ds_h32i32_indexhandle*, ijha_fifo_ds_h32i32__pointer_add(self->handles, ijha_fifo_h32_handle_stride(self->handles_stride_userdata_offset)*(index)))
+#define ijha_fifo_ds_h32i32__handle_info_at(index) ijha_fifo_ds_h32i32__pointer_add(struct ijha_fifo_ds_h32i32_indexhandle*, self->handles, ijha_fifo_h32_handle_stride(self->handles_stride_userdata_offset)*(index))
 
 static unsigned ijha_fifo_ds_h32i32__num_bits(unsigned n) { unsigned res=0; while (n >>= 1) res++; return res; }
 
@@ -199,12 +198,12 @@ IJHA_FIFO_DS_H32I32_API void ijha_fifo_ds_h32i32_init(struct ijha_fifo_h32 *self
 IJHA_FIFO_DS_H32I32_API unsigned ijha_fifo_ds_h32i32_acquire_mask(struct ijha_fifo_h32 *self,
    unsigned userflags, unsigned *handle_out)
 {
-   unsigned dense_index = ijha_fifo_h32_acquire_mask(self, userflags, handle_out);
+   unsigned dense_index = self->num_handles;
+   unsigned sparse_index = ijha_fifo_h32_acquire_mask(self, userflags, handle_out);
    IJHA_FIFO_DS_H32I32_assert(ijha_fifo_h32_userdata_offset(self->handles_stride_userdata_offset) == sizeof(struct ijha_fifo_ds_h32i32_indexhandle));
-   if (dense_index == IJHA_FIFO_H32_INVALID_INDEX) {
+   if (sparse_index == IJHA_FIFO_H32_INVALID_INDEX) {
       return IJHA_FIFO_H32_INVALID_INDEX;
    } else {
-      unsigned sparse_index = *handle_out&self->capacity_mask;
       ijha_fifo_ds_h32i32__handle_info_at(sparse_index)->dense_index = dense_index;
       ijha_fifo_ds_h32i32__handle_info_at(dense_index)->sparse_index = sparse_index;
       return dense_index;
