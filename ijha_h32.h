@@ -1,7 +1,7 @@
 /* clang-format off */
 
 /*
-ijha_h32 : IncredibleJunior HandleAllocator 32-bit Handles
+ijha_h32 : IncredibleJunior HandleAllocator 32-bit Handles - v1.0
 
 In many situations it's desirable to refer to objects/resources by handles
 instead of pointers. In addition to memory safety, like detecting double free's
@@ -47,11 +47,19 @@ Once a handle is acquired from the queue, it can be reused
 2^(num generation bits)-1 times before returning a false positive.
 
 The _optional_ userflags is stored before the most significant bit (MSB)
-of the 32-bit handle.
+of the 32-bit handle by default.
 
 MSB                                                                            LSB
 +--------------------------------------------------------------------------------+
 | in-use-bit | _optional_ userflags | generation | sparse-index or freelist next |
++--------------------------------------------------------------------------------+
+
+If handle allocator is initialized with the flag `IJHA_H32_INIT_DONT_USE_MSB_AS_IN_USE_BIT`
+the handle layout changes to the following:
+
+MSB                                                                            LSB
++--------------------------------------------------------------------------------+
+| _optional_ userflags | generation | in-use-bit | sparse-index or freelist next |
 +--------------------------------------------------------------------------------+
 
 A newly initialized handle allocator starts allocating handles with sparse index
@@ -115,6 +123,10 @@ EXAMPLES/UNIT TESTS
 LICENSE
    See end of file for license information
 
+REVISIONS
+   1.0 (2022-08-12) First version
+                    `IJHA_H32_INIT_DONT_USE_MSB_AS_IN_USE_BIT` flag added
+
 References:
    [1] https://floooh.github.io/2018/06/17/handles-vs-pointers.html
    [2] http://bitsquid.blogspot.se/2011/09/managing-decoupling-part-4-id-lookup.html
@@ -158,7 +170,7 @@ struct ijha_h32 {
    unsigned generation_mask;
    unsigned userflags_mask;
 
-   unsigned reserved32;
+   unsigned in_use_bit;
 
    /* enqueue/add/put items at the back (+dequeue/remove/get items from the front _iff_ LIFO) */
    unsigned freelist_enqueue_index;
@@ -192,7 +204,11 @@ enum ijha_h32_init_flags {
    IJHA_H32_INIT_LIFOFIFO_MASK = 0xc0,
 
    /* NB: FIFO is unsupported in thread-safe version, just LIFO */
-   IJHA_H32_INIT_THREADSAFE = 1 << 8
+   IJHA_H32_INIT_THREADSAFE = 1 << 8,
+
+   /* disable default behaviour of storing the "in use"-bit in MSB of handle
+      and instead uses the bit after the bits used to represent the sparse index */
+   IJHA_H32_INIT_DONT_USE_MSB_AS_IN_USE_BIT = 1 << 9
 };
 
 /* please refer to 'ijha_h32_init_no_inlinehandles' and 'ijha_h32_init_inlinehandles' helper macros */
@@ -337,11 +353,13 @@ IJHA_H32_API void ijha_h32_reset(struct ijha_h32 *self);
 /* index of the handle (stable, i.e. will not move) */
 #define ijha_h32_index(self, handle) ((self)->capacity_mask & (handle))
 
-/* if index or handle is inuse
- * NB: 'ijha_h32_inuse' checks the passed in handle, _NOT_ the stored handle */
-#define ijha_h32_inuse_bit (0x80000000)
-#define ijha_h32_inuse(handle) ((handle)&ijha_h32_inuse_bit)
-#define ijha_h32_inuse_index(self, index) ijha_h32_inuse(*ijha_h32_handle_info_at((self), (index)))
+/* if index or handle is in use
+ * NB: 'ijha_h32_in_use' checks the passed in handle, _NOT_ the stored handle */
+#define ijha_h32_in_use_bit(self) ((self)->in_use_bit)
+#define ijha_h32_in_use(self, handle) ((handle)&ijha_h32_in_use_bit((self)))
+#define ijha_h32_in_use_index(self, index) ijha_h32_in_use((self), *ijha_h32_handle_info_at((self), (index)))
+
+#define ijha_h32_in_use_msb(self) (ijha_h32_in_use_bit(self)&0x80000000)
 
 #define ijha_h32_handle_stride(v) ((v)&0x0000ffffu)
 #define ijha_h32_handle_offset(v) (((v)&0x00ff0000u) >> 16)
@@ -352,7 +370,7 @@ IJHA_H32_API void ijha_h32_reset(struct ijha_h32 *self);
 /* pointer to handle */
 #define ijha_h32_handle_info_at(self, index) ijha_h32_pointer_add(unsigned *, (self)->handles, ijha_h32_handle_offset((self)->handles_stride_userdata_offset) + ijha_h32_handle_stride((self)->handles_stride_userdata_offset) * (index))
 
-#define ijha_h32_valid_mask(self, handle, handlemask) (((self)->capacity > ((handle) & (self)->capacity_mask)) && ijha_h32_inuse((handle)) && ((*ijha_h32_handle_info_at((self), ((handle) & (self)->capacity_mask)) & (handlemask)) == ((handle) & (handlemask))))
+#define ijha_h32_valid_mask(self, handle, handlemask) (((self)->capacity > ((handle) & (self)->capacity_mask)) && ijha_h32_in_use((self), (handle)) && ((*ijha_h32_handle_info_at((self), ((handle) & (self)->capacity_mask)) & (handlemask)) == ((handle) & (handlemask))))
 /* if handle is valid/active */
 #define ijha_h32_valid(self, handle) ijha_h32_valid_mask((self), (handle), (0xffffffffu))
 
@@ -370,11 +388,11 @@ IJHA_H32_API unsigned ijha_h32_userflags_set(struct ijha_h32 *self, unsigned han
  * times the number of userflags-bits is stored in the instance */
 #define ijha_h32_userflags_num_bits(self) ((self)->flags_num_userflag_bits&31)
 
-#define ijha_h32_userflags_to_handle_bits(userflags, num_userflag_bits) (((unsigned)(userflags))<<(31-(num_userflag_bits)))
-#define ijha_h32_userflags_to_handle(self, userflags) ijha_h32_userflags_to_handle_bits(userflags, ijha_h32_userflags_num_bits((self)))
+#define ijha_h32_userflags_to_handle_bits(self, userflags, num_userflag_bits) (((unsigned)(userflags))<<((31+!ijha_h32_in_use_msb(self))-(num_userflag_bits)))
+#define ijha_h32_userflags_to_handle(self, userflags) ijha_h32_userflags_to_handle_bits(self, userflags, ijha_h32_userflags_num_bits((self)))
 
-#define ijha_h32_userflags_from_handle_bits(handle, num_userflag_bits) ((((handle)&0x7fffffff)>>(31-(num_userflag_bits))))
-#define ijha_h32_userflags_from_handle(self, handle) ijha_h32_userflags_from_handle_bits(handle, ijha_h32_userflags_num_bits((self)))
+#define ijha_h32_userflags_from_handle_bits(self, handle, num_userflag_bits) ((((handle)&(0xffffffff>>!!ijha_h32_in_use_msb(self)))>>((31+!ijha_h32_in_use_msb(self))-(num_userflag_bits))))
+#define ijha_h32_userflags_from_handle(self, handle) ijha_h32_userflags_from_handle_bits(self, handle, ijha_h32_userflags_num_bits((self)))
 
 /* retrieve pointer to userdata of handle (assumes instance was initialized with userdata)
  * NB: 'ijha_h32_userdata' assumes that the handle/index is valid
@@ -421,7 +439,7 @@ IJHA_H32_API unsigned ijha_h32_userflags_set(struct ijha_h32 *self, unsigned han
 
       #pragma intrinsic(_InterlockedIncrement)
       #pragma intrinsic(_InterlockedDecrement)
-      /* returns the result if the operation */
+      /* returns the result of the operation */
       #define IJHA_H32_InterlockedIncrement(ptr) _InterlockedIncrement((long volatile*)(ptr))
       #define IJHA_H32_InterlockedDecrement(ptr) _InterlockedDecrement((long volatile*)(ptr))
 
@@ -429,7 +447,7 @@ IJHA_H32_API unsigned ijha_h32_userflags_set(struct ijha_h32 *self, unsigned han
    #else
       #define IJHA_H32_CAS(ptr, new, old) __sync_bool_compare_and_swap((ptr), (old), (new))
 
-      /* returns the result if the operation */
+      /* returns the result of the operation */
       #define IJHA_H32_InterlockedIncrement(ptr) __sync_add_and_fetch((ptr), 1)
       #define IJHA_H32_InterlockedDecrement(ptr) __sync_sub_and_fetch((ptr), 1)
 
@@ -442,12 +460,11 @@ IJHA_H32_API unsigned ijha_h32_userflags_set(struct ijha_h32 *self, unsigned han
    #define IJHA_H32_assert assert
 #endif
 
-/* legacy, for when there existed a runtime-option to choose where to store the
- * in-use-bit. notes:
- *    - inuse-bit is stored in MSB     -> (capacity_mask+1) is the first generation bit
+/* handle the runtime-option where the "in use"-bit is stored.
+ *    - "in use"-bit is stored in MSB     -> (capacity_mask+1) is the first generation bit
  *    or
- *    - inuse-bit is (capacity_mask+1) -> (capacity_mask+1)<<1 is the first generation bit */
-#define ijha_h32__generation_add(self) ((self)->capacity_mask+1)
+ *    - "in use"-bit is (capacity_mask+1) -> (capacity_mask+1)<<1 is the first generation bit */
+#define ijha_h32__generation_add(self) (((self)->flags_num_userflag_bits&IJHA_H32_INIT_DONT_USE_MSB_AS_IN_USE_BIT)?(((self)->capacity_mask+1)<<1):(((self)->capacity_mask+1)))
 
 IJHA_H32_API unsigned ijha_h32_memory_size_needed(unsigned max_num_handles, unsigned userdata_size_in_bytes_per_item, int inline_handles, unsigned ijha_flags)
 {
@@ -458,7 +475,7 @@ IJHA_H32_API unsigned ijha_h32_memory_size_needed(unsigned max_num_handles, unsi
 static unsigned ijha_h32__acquire_userflags_lifo_fifo(struct ijha_h32 *self, unsigned userflags, unsigned *handle_out)
 {
    unsigned current_cursor = self->freelist_dequeue_index;
-   unsigned inusebit = ijha_h32_inuse_bit;
+   unsigned in_use_bit = ijha_h32_in_use_bit(self);
    unsigned userflags_mask = self->userflags_mask;
    unsigned maxnhandles = self->capacity - ijha_h32_is_fifo(self);
    IJHA_H32_assert((userflags_mask & userflags) == userflags);
@@ -467,7 +484,7 @@ static unsigned ijha_h32__acquire_userflags_lifo_fifo(struct ijha_h32 *self, uns
       /* NOTE
        * if only used as a LIFO queue and one don't need/want to keep dense<->sparse mapping,
        * or the need of number acquired handles, then the 'size' bookkeeping could be skipped altogether.
-       * a check 'if (*ijha_h32_handle_info_at(current_cursor)&inusebit)' will tell if all handles is used */
+       * a check 'if (*ijha_h32_handle_info_at(current_cursor)&in_use_bit)' will tell if all handles is used */
       *handle_out = 0;
       return IJHA_H32_INVALID_INDEX;
    } else {
@@ -478,7 +495,7 @@ static unsigned ijha_h32__acquire_userflags_lifo_fifo(struct ijha_h32 *self, uns
 
       unsigned new_cursor = current_handle & self->capacity_mask;
       unsigned new_generation = generation_mask & (current_handle + generation_to_add);
-      unsigned new_handle = userflags | new_generation | inusebit | current_cursor;
+      unsigned new_handle = userflags | new_generation | in_use_bit | current_cursor;
 
       IJHA_H32_assert(!generation_mask || (*handle & generation_mask) != new_generation); /* no generation or has changed generation */
 
@@ -498,7 +515,7 @@ static unsigned ijha_h32__acquire_lifo_ts(struct ijha_h32 *self, unsigned userfl
    unsigned generation_mask = self->generation_mask;
    unsigned capacity_mask = self->capacity_mask;
    unsigned freelist_serial_add = capacity_mask+1;
-   unsigned inusebit = ijha_h32_inuse_bit;
+   unsigned in_use_bit = ijha_h32_in_use_bit(self);
    unsigned handle_generation_add = ijha_h32__generation_add(self);
 
    IJHA_H32_assert((self->userflags_mask & userflags) == userflags);
@@ -523,7 +540,7 @@ static unsigned ijha_h32__acquire_lifo_ts(struct ijha_h32 *self, unsigned userfl
 
       if (IJHA_H32_CAS(current_freelist_index_serial, new_freelist_index_serial, old_freelist_index_serial)) {
          unsigned new_generation = generation_mask & (current_handle + handle_generation_add);
-         unsigned new_handle = userflags | new_generation | inusebit | current_index;
+         unsigned new_handle = userflags | new_generation | in_use_bit | current_index;
 
          IJHA_H32_assert(!generation_mask || (current_handle & generation_mask) != new_generation); /* no generation or has changed generation */
 
@@ -539,17 +556,17 @@ static unsigned ijha_h32__acquire_lifo_ts(struct ijha_h32 *self, unsigned userfl
 
 static unsigned ijha_h32__release_fifo(struct ijha_h32 *self, unsigned handle)
 {
-   unsigned inusebit = ijha_h32_inuse_bit;
+   unsigned in_use_bit = ijha_h32_in_use_bit(self);
    unsigned idx = handle & self->capacity_mask;
-   unsigned *stored_handle = ((self->capacity > idx) && (handle & inusebit)) ? ijha_h32_handle_info_at(self, idx) : 0;
+   unsigned *stored_handle = ((self->capacity > idx) && (handle & in_use_bit)) ? ijha_h32_handle_info_at(self, idx) : 0;
 
    if (stored_handle && *stored_handle == handle) {
-      /* clear inuse-bit of current */
-      *stored_handle = ~inusebit & ((handle & ~self->capacity_mask));
+      /* clear in_use-bit of current */
+      *stored_handle &= ~in_use_bit;
 
       stored_handle = ijha_h32_handle_info_at(self, self->freelist_enqueue_index);
-      IJHA_H32_assert((*stored_handle & inusebit) == 0);
-      *stored_handle = ~inusebit & ((handle & ~self->capacity_mask) | idx);
+      IJHA_H32_assert((*stored_handle & in_use_bit) == 0);
+      *stored_handle = (*stored_handle & ~self->capacity_mask) | idx;
 
       self->freelist_enqueue_index = idx;
       --self->size;
@@ -561,14 +578,14 @@ static unsigned ijha_h32__release_fifo(struct ijha_h32 *self, unsigned handle)
 
 static unsigned ijha_h32__release_lifo(struct ijha_h32 *self, unsigned handle)
 {
-   unsigned inusebit = ijha_h32_inuse_bit;
+   unsigned in_use_bit = ijha_h32_in_use_bit(self);
    unsigned idx = handle & self->capacity_mask;
-   unsigned *stored_handle = ((self->capacity > idx) && (handle & inusebit)) ? ijha_h32_handle_info_at(self, idx) : 0;
+   unsigned *stored_handle = ((self->capacity > idx) && (handle & in_use_bit)) ? ijha_h32_handle_info_at(self, idx) : 0;
 
    if (stored_handle && *stored_handle == handle) {
       unsigned current_cursor = self->freelist_dequeue_index;
-      /* clear inuse-bit and store current (soon the be old) cursor */
-      *stored_handle = ~inusebit & ((handle & ~self->capacity_mask) | current_cursor);
+      /* clear in_use-bit and store current (soon the be old) cursor */
+      *stored_handle = ~in_use_bit & ((handle & ~self->capacity_mask) | current_cursor);
       self->freelist_dequeue_index = idx;
 
       --self->size;
@@ -584,14 +601,14 @@ static unsigned ijha_h32__release_lifo_ts(struct ijha_h32 *self, unsigned handle
 {
    unsigned *current_freelist_index_serial = &self->freelist_dequeue_index;
    unsigned capacity_mask = self->capacity_mask;
-   unsigned inusebit = ijha_h32_inuse_bit;
+   unsigned in_use_bit = ijha_h32_in_use_bit(self);
    unsigned idx = handle & capacity_mask;
-   unsigned *stored_handle = ((self->capacity > idx) && (handle & inusebit)) ? ijha_h32_handle_info_at(self, idx) : 0;
+   unsigned *stored_handle = ((self->capacity > idx) && (handle & in_use_bit)) ? ijha_h32_handle_info_at(self, idx) : 0;
 
    if (stored_handle && *stored_handle == handle) {
       unsigned freelist_serial_add = capacity_mask + 1;
-      /* clear inusebit and index */
-      handle &= ~(capacity_mask | inusebit);
+      /* clear in_use_bit and index */
+      handle &= ~(capacity_mask | in_use_bit);
 
       for (;;) {
          unsigned old_freelist_index_serial = *current_freelist_index_serial;
@@ -660,8 +677,18 @@ IJHA_H32_API int ijha_h32_initex(struct ijha_h32 *self, unsigned max_num_handles
 
    self->generation_mask = ~(self->capacity_mask | userflags_mask);
 
-   self->generation_mask = (self->generation_mask >> 1) & ~self->capacity_mask; /* inuse-bit is the MSB */
-   self->userflags_mask = userflags_mask >> 1;
+  if ((ijha_flags&IJHA_H32_INIT_DONT_USE_MSB_AS_IN_USE_BIT) == 0) {
+      self->in_use_bit = 0x80000000;
+      self->generation_mask = (self->generation_mask >> 1) & ~self->capacity_mask; /* in_use-bit is the MSB */
+
+      self->userflags_mask = userflags_mask >> 1;
+   } else {
+      self->in_use_bit = self->capacity_mask+1;
+
+      self->generation_mask &= self->generation_mask << 1; /* mask out the in_use-bit */
+
+      self->userflags_mask = userflags_mask;
+   }
 
    if ((ijha_h32__num_bits(max_num_handles) - 1) + num_userflag_bits >= 32)
       init_res |= IJHA_H32_INIT_CONFIGURATION_UNSUPPORTED;
@@ -692,8 +719,6 @@ IJHA_H32_API int ijha_h32_initex(struct ijha_h32 *self, unsigned max_num_handles
       }
    }
 
-   self->reserved32 = 0;
-
    if (init_res == IJHA_H32_INIT_NO_ERROR)
       ijha_h32_reset(self);
 
@@ -703,8 +728,9 @@ IJHA_H32_API int ijha_h32_initex(struct ijha_h32 *self, unsigned max_num_handles
 IJHA_H32_API void ijha_h32_reset(struct ijha_h32 *self)
 {
    /* always reset handles with full generation mask as then the first
-    * allocation/acquire makes it wrap-around, which guarantees that the
-    * handles allocated (barring any releases) becomes:
+    * allocation/acquire makes it wrap-around. this guarantees that the
+    * handles allocated, barring any releases and handle allocator is not
+    * initialized with `IJHA_H32_INIT_DONT_USE_MSB_AS_IN_USE_BIT`-flag, becomes:
     *
     * (0x80000000 | 0) -> (0x80000000 | 1) -> (0x80000000 | 2) -> etc
     *
@@ -793,15 +819,18 @@ static void ijha_h32_test_inline_noinline_handles(void)
    unsigned i, j, maxnhandles, dummy, handles[IJHA_TEST_MAX_NUM_HANDLES];
    int init_res;
 
-   for (idx = 0; idx != num; ++idx) {
-      unsigned LIFO_FIFO_FLAG = LIFO_FIFO_FLAGS[idx];
+   for (idx = 0; idx != num*2; ++idx) {
+      unsigned LIFO_FIFO_FLAG = LIFO_FIFO_FLAGS[idx%num];
+
       unsigned num_userflag_bits = 0;
-      unsigned ijha_flags = LIFO_FIFO_FLAG;
       unsigned userdata_size_in_bytes_per_item = sizeof(struct ijha_h32_test_userdata);
       struct ijha_h32_test_userdata userdata_inlinehandles[IJHA_TEST_MAX_NUM_HANDLES];
 
+      if (idx >= num)
+         LIFO_FIFO_FLAG |= IJHA_H32_INIT_DONT_USE_MSB_AS_IN_USE_BIT;
+
       IJHA_H32_assert(sizeof userdata_inlinehandles >= ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 1, LIFO_FIFO_FLAG));
-      init_res = ijha_h32_init_inlinehandles(self, IJHA_TEST_MAX_NUM_HANDLES, num_userflag_bits, sizeof(struct ijha_h32_test_userdata), ijha_h32_test_offsetof(struct ijha_h32_test_userdata, inline_handle), ijha_flags, userdata_inlinehandles);
+      init_res = ijha_h32_init_inlinehandles(self, IJHA_TEST_MAX_NUM_HANDLES, num_userflag_bits, sizeof(struct ijha_h32_test_userdata), ijha_h32_test_offsetof(struct ijha_h32_test_userdata, inline_handle), LIFO_FIFO_FLAG, userdata_inlinehandles);
       IJHA_H32_assert(init_res == IJHA_H32_INIT_NO_ERROR);
       maxnhandles = ijha_h32_capacity(self);
 
@@ -822,15 +851,18 @@ static void ijha_h32_test_inline_noinline_handles(void)
       }
    }
 
-   for (idx = 0; idx != num; ++idx) {
-      unsigned LIFO_FIFO_FLAG = LIFO_FIFO_FLAGS[idx];
+   for (idx = 0; idx != num*2; ++idx) {
+      unsigned LIFO_FIFO_FLAG = LIFO_FIFO_FLAGS[idx%num];
+
       unsigned num_userflag_bits = 0;
-      unsigned ijha_flags = LIFO_FIFO_FLAG;
       unsigned userdata_size_in_bytes_per_item = 0;
       unsigned all_handles_memory[IJHA_TEST_MAX_NUM_HANDLES];
 
+      if (idx >= num)
+         LIFO_FIFO_FLAG |= IJHA_H32_INIT_DONT_USE_MSB_AS_IN_USE_BIT;
+
       IJHA_H32_assert(sizeof all_handles_memory >= ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 0, LIFO_FIFO_FLAG));
-      init_res = ijha_h32_init_no_inlinehandles(self, IJHA_TEST_MAX_NUM_HANDLES, num_userflag_bits, userdata_size_in_bytes_per_item, ijha_flags, all_handles_memory);
+      init_res = ijha_h32_init_no_inlinehandles(self, IJHA_TEST_MAX_NUM_HANDLES, num_userflag_bits, userdata_size_in_bytes_per_item, LIFO_FIFO_FLAG, all_handles_memory);
       IJHA_H32_assert(init_res == IJHA_H32_INIT_NO_ERROR);
 
       maxnhandles = ijha_h32_capacity(self);
@@ -848,16 +880,18 @@ static void ijha_h32_test_inline_noinline_handles(void)
       }
    }
 
-   for (idx = 0; idx != num; ++idx) {
-      unsigned LIFO_FIFO_FLAG = LIFO_FIFO_FLAGS[idx];
+   for (idx = 0; idx != num*2; ++idx) {
+      unsigned LIFO_FIFO_FLAG = LIFO_FIFO_FLAGS[idx%num];
       unsigned num_userflag_bits = 0;
-      unsigned ijha_flags = LIFO_FIFO_FLAG;
       unsigned userdata_size_in_bytes_per_item = sizeof(struct ijha_h32_test_userdata);
       unsigned stride = sizeof(struct ijha_h32_test_userdata) + sizeof(unsigned);
       unsigned char memory_for_noinline_handles[(sizeof(struct ijha_h32_test_userdata) + sizeof(unsigned))*IJHA_TEST_MAX_NUM_HANDLES];
 
+      if (idx >= num)
+         LIFO_FIFO_FLAG |= IJHA_H32_INIT_DONT_USE_MSB_AS_IN_USE_BIT;
+
       IJHA_H32_assert(sizeof memory_for_noinline_handles >= ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 0, LIFO_FIFO_FLAG));
-      init_res = ijha_h32_init_no_inlinehandles(self, IJHA_TEST_MAX_NUM_HANDLES, num_userflag_bits, userdata_size_in_bytes_per_item, ijha_flags, memory_for_noinline_handles);
+      init_res = ijha_h32_init_no_inlinehandles(self, IJHA_TEST_MAX_NUM_HANDLES, num_userflag_bits, userdata_size_in_bytes_per_item, LIFO_FIFO_FLAG, memory_for_noinline_handles);
       IJHA_H32_assert(init_res == IJHA_H32_INIT_NO_ERROR);
 
       maxnhandles = ijha_h32_capacity(self);
@@ -897,9 +931,12 @@ static void ijha_h32_test_basic_operations(void)
    unsigned idx, num = sizeof LIFO_FIFO_FLAGS / sizeof *LIFO_FIFO_FLAGS;
    int init_res;
 
-   for (idx = 0; idx != num; ++idx) {
-      unsigned LIFO_FIFO_FLAG = LIFO_FIFO_FLAGS[idx];
+   for (idx = 0; idx != num*2; ++idx) {
+      unsigned LIFO_FIFO_FLAG = LIFO_FIFO_FLAGS[idx%num];
       unsigned i, j, user_nbits;
+
+      if (idx >= num)
+         LIFO_FIFO_FLAG |= IJHA_H32_INIT_DONT_USE_MSB_AS_IN_USE_BIT;
 
       for (user_nbits = 0; user_nbits != 29; ++user_nbits) {
          unsigned maxnhandles;
@@ -921,14 +958,14 @@ static void ijha_h32_test_basic_operations(void)
             if (user_nbits > 1) {
                testcolor = (enum IJHA_H32_TestColor)(i%4);
                userflags = ijha_h32_userflags_to_handle(self, testcolor);
-               userflags_test = ijha_h32_userflags_to_handle_bits(testcolor, user_nbits);
+               userflags_test = ijha_h32_userflags_to_handle_bits(self, testcolor, user_nbits);
                IJHA_H32_assert(userflags == userflags_test);
                userflags_test = ijha_h32_userflags_from_handle(self, userflags);
                IJHA_H32_assert((unsigned)testcolor == userflags_test);
             }
             si = ijha_h32_acquire_userflags(self, userflags, &handles[i]);
-            IJHA_H32_assert(ijha_h32_inuse(handles[i]));
-            IJHA_H32_assert(ijha_h32_inuse_index(self, si));
+            IJHA_H32_assert(ijha_h32_in_use(self, handles[i]));
+            IJHA_H32_assert(ijha_h32_in_use_index(self, si));
             for (j = 0; j != i + 1; ++j)
                IJHA_H32_assert(ijha_h32_valid(self, handles[j]));
 
@@ -938,13 +975,13 @@ static void ijha_h32_test_basic_operations(void)
 
                IJHA_H32_assert(stored_userflags == userflags);
                IJHA_H32_assert(userflags_from_handle == (unsigned)testcolor);
-               IJHA_H32_assert(ijha_h32_userflags_from_handle_bits(stored_userflags, user_nbits) == (unsigned)testcolor);
+               IJHA_H32_assert(ijha_h32_userflags_from_handle_bits(self, stored_userflags, user_nbits) == (unsigned)testcolor);
                IJHA_H32_assert(ijha_h32_userflags_set(self, handles[i], stored_userflags) == userflags);
                IJHA_H32_assert(ijha_h32_userflags_set(self, handles[i], stored_userflags) == userflags);
             } else {
                /* thread-safe LIFO starts the idx at 1, as the 0 is used as end-of-list/sentinel */
                unsigned idx_add = (LIFO_FIFO_FLAG&IJHA_H32_INIT_THREADSAFE) ? 1 : 0;
-               IJHA_H32_assert(handles[i] == (0x80000000 | (i + idx_add)));
+               IJHA_H32_assert(handles[i] == (ijha_h32_in_use_bit(self) | (i + idx_add)));
             }
             IJHA_H32_assert(si != IJHA_H32_INVALID_INDEX);
          }
@@ -1016,7 +1053,7 @@ static void ijha_h32_test_constant_handles(void)
     * if using userflags then these have to be present here also (no userflags in
     * this example)
     *
-    * NB: that the constants have the inuse-bit set (ijha_h32_inuse_bit / 0x80000000)
+    * NB: that the constants have the in_use-bit set (ijha_h32_in_use_bit / 0x80000000)
     *     so they will pass the 'ijha_h32_valid' checks when used
     */
    #define PUBLIC_API_MAIN_WINDOW_HANDLE        (0x80000000)
@@ -1059,7 +1096,7 @@ static void ijha_h32_test_constant_handles(void)
             struct ijha_h32_test_userdata *userdata = ijha_h32_userdata(struct ijha_h32_test_userdata*, self, 0);
             /* as it is a freelist it points to next node */
             IJHA_H32_assert(ijha_h32_index(self, *handleinfo) == 1);
-            IJHA_H32_assert(ijha_h32_inuse(*handleinfo) == 0);
+            IJHA_H32_assert(ijha_h32_in_use(self, *handleinfo) == 0);
             *handleinfo = PUBLIC_API_MAIN_WINDOW_HANDLE;
             self->size++;
             handles[0] = *handleinfo;
