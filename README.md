@@ -20,14 +20,6 @@ All allocators are implemented as a [stb-style header-file library](https://gith
 
 - [ijss.h](https://github.com/incrediblejr/ijhandlealloc/blob/master/ijss.h) sparse set for bookkeeping of dense<->sparse index mapping or a building-block for a simple LIFO index/handle allocator.
 
-*Legacy allocators*, as [ijha_fifo_h32](https://github.com/incrediblejr/ijhandlealloc/blob/master/ijha_fifo_h32.h) has been superseded by [ijha_h32](https://github.com/incrediblejr/ijhandlealloc/blob/master/ijha_h32.h), optionally used in combination with [ijss](https://github.com/incrediblejr/ijhandlealloc/blob/master/ijss.h) to keep the dense<->sparse mappings.
-
-- [ijha_fifo_h32.h](https://github.com/incrediblejr/ijhandlealloc/blob/master/ijha_fifo_h32.h) is a FIFO handle allocator with handles that have a user configurable number of userdata/flags bits and variable number of generation bits. Memory usage: 8bytes / handle.
-
-- [ijha_fifo_ds_h32i32.h](https://github.com/incrediblejr/ijhandlealloc/blob/master/ijha_fifo_ds_h32i32.h) is a FIFO handle allocator built on top of ijha_fifo_h32 with added bookkeeping of handle's sparse/dense relationships to be able to keep all (used) data linear in memory while retaining stable handles. Memory usage: 16bytes / handle.
-
-- [ijha_fifo_ds_h32i16.h](https://github.com/incrediblejr/ijhandlealloc/blob/master/ijha_fifo_ds_h32i16.h) is the same as ijha_fifo_ds_h32i32.h but with 16bit indices, saving 4 bytes per handle tracked. Use this if less or equal to 65535 handles is needed. Memory usage: 12bytes / handle.
-
 ## License
 
 Dual-licensed under 3-Clause BSD & Unlicense license.
