@@ -126,6 +126,10 @@ LICENSE
 REVISIONS
    1.0 (2022-08-12) First version
                     'IJHA_H32_INIT_DONT_USE_MSB_AS_IN_USE_BIT' flag added
+   1.1 (2024-02-29) Added 'ijha_h32_memory_size_allocated'
+                    *Breaking Change*
+                    Removed unused flags parameter from 'ijha_h32_memory_size_needed'.
+                    When upgrading just remove 'ijha_flags' parameter from call (last parameter)
 
 References:
    [1] https://floooh.github.io/2018/06/17/handles-vs-pointers.html
@@ -188,7 +192,7 @@ struct ijha_h32 {
  *
  * NB: size of 'struct ijha_h32' is *NOT* included
  */
-IJHA_H32_API unsigned ijha_h32_memory_size_needed(unsigned max_num_handles, unsigned userdata_size_in_bytes_per_item, int inline_handles, unsigned ijha_flags);
+IJHA_H32_API unsigned ijha_h32_memory_size_needed(unsigned max_num_handles, unsigned userdata_size_in_bytes_per_item, int inline_handles);
 
 /* returns the number of bytes allocated for instance, the inverse of 'ijha_h32_memory_size_needed'
  * NB: size of 'struct ijha_h32' is *NOT* included */
@@ -472,9 +476,8 @@ IJHA_H32_API unsigned ijha_h32_userflags_set(struct ijha_h32 *self, unsigned han
  *    - "in use"-bit is (capacity_mask+1) -> (capacity_mask+1)<<1 is the first generation bit */
 #define ijha_h32__generation_add(self) (((self)->flags_num_userflag_bits&IJHA_H32_INIT_DONT_USE_MSB_AS_IN_USE_BIT)?(((self)->capacity_mask+1)<<1):(((self)->capacity_mask+1)))
 
-IJHA_H32_API unsigned ijha_h32_memory_size_needed(unsigned max_num_handles, unsigned userdata_size_in_bytes_per_item, int inline_handles, unsigned ijha_flags)
+IJHA_H32_API unsigned ijha_h32_memory_size_needed(unsigned max_num_handles, unsigned userdata_size_in_bytes_per_item, int inline_handles)
 {
-   (void)ijha_flags;
    return max_num_handles * (sizeof(unsigned)*(inline_handles ? 0 : 1) + userdata_size_in_bytes_per_item);
 }
 
@@ -835,10 +838,10 @@ static void ijha_h32_test_inline_noinline_handles(void)
       if (idx >= num)
          LIFO_FIFO_FLAG |= IJHA_H32_INIT_DONT_USE_MSB_AS_IN_USE_BIT;
 
-      IJHA_H32_assert(sizeof userdata_inlinehandles >= ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 1, LIFO_FIFO_FLAG));
+      IJHA_H32_assert(sizeof userdata_inlinehandles >= ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 1));
       init_res = ijha_h32_init_inlinehandles(self, IJHA_TEST_MAX_NUM_HANDLES, num_userflag_bits, sizeof(struct ijha_h32_test_userdata), ijha_h32_test_offsetof(struct ijha_h32_test_userdata, inline_handle), LIFO_FIFO_FLAG, userdata_inlinehandles);
       IJHA_H32_assert(init_res == IJHA_H32_INIT_NO_ERROR);
-      IJHA_H32_assert(ijha_h32_memory_size_allocated(self) == ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 1, LIFO_FIFO_FLAG));
+      IJHA_H32_assert(ijha_h32_memory_size_allocated(self) == ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 1));
       maxnhandles = ijha_h32_capacity(self);
 
       for (i = 0; i != maxnhandles; ++i) {
@@ -868,10 +871,10 @@ static void ijha_h32_test_inline_noinline_handles(void)
       if (idx >= num)
          LIFO_FIFO_FLAG |= IJHA_H32_INIT_DONT_USE_MSB_AS_IN_USE_BIT;
 
-      IJHA_H32_assert(sizeof all_handles_memory >= ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 0, LIFO_FIFO_FLAG));
+      IJHA_H32_assert(sizeof all_handles_memory >= ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 0));
       init_res = ijha_h32_init_no_inlinehandles(self, IJHA_TEST_MAX_NUM_HANDLES, num_userflag_bits, userdata_size_in_bytes_per_item, LIFO_FIFO_FLAG, all_handles_memory);
       IJHA_H32_assert(init_res == IJHA_H32_INIT_NO_ERROR);
-      IJHA_H32_assert(ijha_h32_memory_size_allocated(self) == ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 0, LIFO_FIFO_FLAG));
+      IJHA_H32_assert(ijha_h32_memory_size_allocated(self) == ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 0));
       maxnhandles = ijha_h32_capacity(self);
 
       for (i = 0; i != maxnhandles; ++i) {
@@ -897,10 +900,10 @@ static void ijha_h32_test_inline_noinline_handles(void)
       if (idx >= num)
          LIFO_FIFO_FLAG |= IJHA_H32_INIT_DONT_USE_MSB_AS_IN_USE_BIT;
 
-      IJHA_H32_assert(sizeof memory_for_noinline_handles >= ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 0, LIFO_FIFO_FLAG));
+      IJHA_H32_assert(sizeof memory_for_noinline_handles >= ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 0));
       init_res = ijha_h32_init_no_inlinehandles(self, IJHA_TEST_MAX_NUM_HANDLES, num_userflag_bits, userdata_size_in_bytes_per_item, LIFO_FIFO_FLAG, memory_for_noinline_handles);
       IJHA_H32_assert(init_res == IJHA_H32_INIT_NO_ERROR);
-      IJHA_H32_assert(ijha_h32_memory_size_allocated(self) == ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 0, LIFO_FIFO_FLAG));
+      IJHA_H32_assert(ijha_h32_memory_size_allocated(self) == ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 0));
       maxnhandles = ijha_h32_capacity(self);
 
       for (i = 0; i != maxnhandles; ++i) {
@@ -953,10 +956,10 @@ static void ijha_h32_test_basic_operations(void)
          IJHA_H32_memset(ijha_h32_memory_area, 0, sizeof ijha_h32_memory_area);
          IJHA_H32_memset(handles, 0, sizeof handles);
 
-         IJHA_H32_assert(sizeof ijha_h32_memory_area >= ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 0, LIFO_FIFO_FLAG));
+         IJHA_H32_assert(sizeof ijha_h32_memory_area >= ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 0));
          init_res = ijha_h32_init_no_inlinehandles(self, IJHA_TEST_MAX_NUM_HANDLES, user_nbits, userdata_size_in_bytes_per_item, LIFO_FIFO_FLAG, ijha_h32_memory_area);
          IJHA_H32_assert(init_res == IJHA_H32_INIT_NO_ERROR);
-         IJHA_H32_assert(ijha_h32_memory_size_allocated(self) == ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 0, LIFO_FIFO_FLAG));
+         IJHA_H32_assert(ijha_h32_memory_size_allocated(self) == ijha_h32_memory_size_needed(IJHA_TEST_MAX_NUM_HANDLES, userdata_size_in_bytes_per_item, 0));
          maxnhandles = ijha_h32_capacity(self);
 
          for (i = 0; i != maxnhandles; ++i) {
@@ -1082,7 +1085,7 @@ static void ijha_h32_test_constant_handles(void)
          unsigned num_userflag_bits = 0;
          unsigned ijha_flags = LIFO_FIFO_FLAG;
          unsigned userdata_size_in_bytes_per_item = sizeof(struct ijha_h32_test_userdata);
-         IJHA_H32_assert(sizeof userdata_inlinehandles >= ijha_h32_memory_size_needed(cap, userdata_size_in_bytes_per_item, 1, LIFO_FIFO_FLAG));
+         IJHA_H32_assert(sizeof userdata_inlinehandles >= ijha_h32_memory_size_needed(cap, userdata_size_in_bytes_per_item, 1));
          init_res = ijha_h32_init_inlinehandles(self, cap, num_userflag_bits, sizeof(struct ijha_h32_test_userdata), ijha_h32_test_offsetof(struct ijha_h32_test_userdata, inline_handle), ijha_flags, userdata_inlinehandles);
          IJHA_H32_assert(init_res == IJHA_H32_INIT_NO_ERROR);
          /* setup finished */
